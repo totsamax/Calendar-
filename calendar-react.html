@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>React-календарь с событиями</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f7;
+      padding: 20px;
+    }
+
+    .calendar-wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin-bottom: 16px;
+      font-size: 24px;
+    }
+
+    .calendar {
+      display: grid;
+      grid-template-columns: 70px repeat(5, 1fr);
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .calendar-header {
+      display: contents;
+    }
+
+    .time-header {
+      padding: 8px;
+      background: #fafafa;
+      border-bottom: 1px solid #eee;
+      font-size: 12px;
+      color: #888;
+    }
+
+    .day-header {
+      padding: 8px;
+      text-align: center;
+      background: #fafafa;
+      border-left: 1px solid #eee;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .calendar-body {
+      display: contents;
+    }
+
+    .time-column {
+      position: relative;
+      background: #fcfcfc;
+      border-right: 1px solid #eee;
+    }
+
+    .day-column {
+      position: relative;
+      border-left: 1px solid #eee;
+      overflow: hidden;
+    }
+
+    .time-column-inner,
+    .day-column-inner {
+      position: relative;
+      height: 960px;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        #ffffff,
+        #ffffff 19px,
+        #f1f3f5 20px
+      );
+    }
+
+    .day-column-inner::before,
+    .time-column-inner::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 79px,
+        rgba(0,0,0,0.08) 80px
+      );
+      pointer-events: none;
+    }
+
+    .time-label {
+      position: absolute;
+      left: 4px;
+      font-size: 11px;
+      color: #777;
+      transform: translateY(-50%);
+    }
+
+    .event {
+      position: absolute;
+      border-radius: 4px;
+      background: rgba(51, 133, 255, 0.15);
+      border: 1px solid #337dff;
+      padding: 4px 6px 12px;
+      font-size: 12px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .event-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .event-time {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .resize-handle {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 8px;
+      cursor: ns-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .resize-handle::before {
+      content: "";
+      width: 30%;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(51, 125, 255, 0.9);
+    }
+
+    .event.resizing {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+<div class="calendar-wrapper">
+  <h1>Календарь (React, 08:00–20:00, шаг 15 мин)</h1>
+  <div id="root"></div>
+</div>
+
+<!-- React + ReactDOM + Babel -->
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+<script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+
+<script type="text/babel">
+  const { useState, useRef, useEffect, useMemo } = React;
+
+  // Константы времени и сетки
+  const DAY_START = 8 * 60;      // 08:00 в минутах
+  const DAY_END   = 20 * 60;     // 20:00
+  const SLOT_MINUTES = 15;       // шаг 15 минут
+  const SLOT_HEIGHT  = 20;       // высота одного слота
+  const TOTAL_SLOTS  = (DAY_END - DAY_START) / SLOT_MINUTES;
+  const DAY_HEIGHT   = TOTAL_SLOTS * SLOT_HEIGHT;
+
+  const initialEvents = [
+    { id: 1, day: 0, title: "Встреча с командой",   start: "09:00", end: "10:30" },
+    { id: 2, day: 0, title: "Звонок клиенту",       start: "10:00", end: "10:45" },
+    { id: 3, day: 2, title: "Фокус работа",         start: "11:15", end: "13:00" },
+    { id: 4, day: 2, title: "1:1 с сотрудником",    start: "12:30", end: "13:30" },
+    { id: 5, day: 4, title: "Демо проекта",         start: "16:00", end: "17:15" }
+  ];
+
+  // Вспомогательные функции
+  function timeToMinutes(timeStr) {
+    const [h, m] = timeStr.split(":").map(Number);
+    return h * 60 + m;
+  }
+
+  function minutesToTime(totalMinutes) {
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    const hh = String(h).padStart(2, "0");
+    const mm = String(m).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  // Алгоритм раскладки событий по дню (пересечения и внутр. колонки)
+  function getPositionedEventsForDay(events, day) {
+    const dayEvents = events.filter(ev => ev.day === day);
+    if (!dayEvents.length) return [];
+
+    const positioned = dayEvents.map(ev => {
+      const startMin = timeToMinutes(ev.start);
+      const endMin = timeToMinutes(ev.end);
+      return {
+        ...ev,
+        startMin,
+        endMin,
+        columnIndex: 0,
+        columnsCount: 1
+      };
+    });
+
+    positioned.sort((a, b) => a.startMin - b.startMin);
+
+    const columnsBuckets = [];
+
+    for (const ev of positioned) {
+      let placed = false;
+
+      for (let i = 0; i < columnsBuckets.length; i++) {
+        const bucket = columnsBuckets[i];
+        const last = bucket[bucket.length - 1];
+
+        if (last.endMin <= ev.startMin) {
+          bucket.push(ev);
+          ev.columnIndex = i;
+          placed = true;
+          break;
+        }
+      }
+
+      if (!placed) {
+        ev.columnIndex = columnsBuckets.length;
+        columnsBuckets.push([ev]);
+      }
+    }
+
+    const maxColumns = columnsBuckets.length;
+    positioned.forEach(ev => {
+      ev.columnsCount = maxColumns;
+    });
+
+    return positioned;
+  }
+
+  function Calendar() {
+    const [events, setEvents] = useState(initialEvents);
+    const resizingRef = useRef(null); // { id, startY, initialEndMin }
+
+    const days = ["Пн", "Вт", "Ср", "Чт", "Пт"];
+
+    const timeLabels = useMemo(() => {
+      const labels = [];
+      for (let m = DAY_START; m <= DAY_END; m += 60) {
+        const offsetMinutes = m - DAY_START;
+        const top = (offsetMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+        labels.push({ time: minutesToTime(m), top });
+      }
+      return labels;
+    }, []);
+
+    const handleResizeMouseDown = (e, ev) => {
+      e.preventDefault();
+      const initialEndMin = timeToMinutes(ev.end);
+      resizingRef.current = {
+        id: ev.id,
+        startY: e.clientY,
+        initialEndMin
+      };
+    };
+
+    // Глобальные обработчики мыши для ресайза
+    useEffect(() => {
+      function handleMouseMove(e) {
+        const r = resizingRef.current;
+        if (!r) return;
+
+        const deltaY = e.clientY - r.startY;
+        const deltaSlots = Math.round(deltaY / SLOT_HEIGHT);
+        const deltaMinutes = deltaSlots * SLOT_MINUTES;
+        const rawNewEndMin = r.initialEndMin + deltaMinutes;
+
+        setEvents(prevEvents =>
+          prevEvents.map(ev => {
+            if (ev.id !== r.id) return ev;
+
+            const startMin = timeToMinutes(ev.start);
+            const minEnd = startMin + SLOT_MINUTES;
+            const maxEnd = DAY_END;
+            const newEndMin = clamp(rawNewEndMin, minEnd, maxEnd);
+
+            return {
+              ...ev,
+              end: minutesToTime(newEndMin)
+            };
+          })
+        );
+      }
+
+      function handleMouseUp() {
+        if (resizingRef.current) {
+          resizingRef.current = null;
+        }
+      }
+
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+
+      return () => {
+        window.removeEventListener("mousemove", handleMouseMove);
+        window.removeEventListener("mouseup", handleMouseUp);
+      };
+    }, []);
+
+    return (
+      <div className="calendar">
+        <div className="calendar-header">
+          <div className="time-header">Время</div>
+          {days.map((dayName, idx) => (
+            <div className="day-header" key={idx}>{dayName}</div>
+          ))}
+        </div>
+
+        <div className="calendar-body">
+          {/* Левая колонка времени */}
+          <div className="time-column">
+            <div
+              className="time-column-inner"
+              style={{ height: DAY_HEIGHT + "px" }}
+            >
+              {timeLabels.map((label, idx) => (
+                <div
+                  key={idx}
+                  className="time-label"
+                  style={{ top: label.top + "px" }}
+                >
+                  {label.time}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Колонки дней */}
+          {days.map((_, dayIndex) => {
+            const positionedEvents = getPositionedEventsForDay(events, dayIndex);
+
+            return (
+              <div className="day-column" key={dayIndex}>
+                <div
+                  className="day-column-inner"
+                  style={{ height: DAY_HEIGHT + "px" }}
+                >
+                  {positionedEvents.map(ev => {
+                    const offsetMinutes = ev.startMin - DAY_START;
+                    const durationMinutes = ev.endMin - ev.startMin;
+                    const top = (offsetMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+                    const height = (durationMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+
+                    const widthPercent = 100 / ev.columnsCount;
+                    const leftPercent = widthPercent * ev.columnIndex;
+
+                    const isResizing =
+                      resizingRef.current && resizingRef.current.id === ev.id;
+
+                    return (
+                      <div
+                        key={ev.id}
+                        className={"event" + (isResizing ? " resizing" : "")}
+                        style={{
+                          top: top + "px",
+                          height: height + "px",
+                          width: `calc(${widthPercent}% - 4px)`,
+                          left: `calc(${leftPercent}% + 2px)`
+                        }}
+                      >
+                        <div className="event-title">{ev.title}</div>
+                        <div className="event-time">
+                          <span className="event-time-start">{ev.start}</span>
+                          {"–"}
+                          <span className="event-time-end">{ev.end}</span>
+                        </div>
+                        <div
+                          className="resize-handle"
+                          onMouseDown={e => handleResizeMouseDown(e, ev)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(<Calendar />);
+</script>
+</body>
+</html>

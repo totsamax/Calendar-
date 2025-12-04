@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>Календарь с событиями</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f7;
+      padding: 20px;
+    }
+
+    .calendar-wrapper {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin-bottom: 16px;
+      font-size: 24px;
+    }
+
+    .calendar {
+      display: grid;
+      grid-template-columns: 70px repeat(5, 1fr);
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    /* Шапка с днями недели */
+    .calendar-header {
+      display: contents;
+    }
+
+    .time-header {
+      padding: 8px;
+      background: #fafafa;
+      border-bottom: 1px solid #eee;
+      font-size: 12px;
+      color: #888;
+    }
+
+    .day-header {
+      padding: 8px;
+      text-align: center;
+      background: #fafafa;
+      border-left: 1px solid #eee;
+      border-bottom: 1px solid #eee;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    /* Тело календаря */
+    .calendar-body {
+      display: contents;
+    }
+
+    .time-column {
+      position: relative;
+      background: #fcfcfc;
+      border-right: 1px solid #eee;
+    }
+
+    .day-column {
+      position: relative;
+      border-left: 1px solid #eee;
+      overflow: hidden;
+    }
+
+    /* Общая высота дневного блока: 8:00–20:00, шаг 15 мин (48 слотов),
+       каждая «клетка» по 20px => 48 * 20 = 960px */
+    .time-column-inner,
+    .day-column-inner {
+      position: relative;
+      height: 960px;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        #ffffff,
+        #ffffff 19px,
+        #f1f3f5 20px
+      );
+    }
+
+    /* более толстая линия каждый час */
+    .day-column-inner::before,
+    .time-column-inner::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: repeating-linear-gradient(
+        to bottom,
+        transparent,
+        transparent 79px,
+        rgba(0,0,0,0.08) 80px
+      );
+      pointer-events: none;
+    }
+
+    /* подписи времени */
+    .time-label {
+      position: absolute;
+      left: 4px;
+      font-size: 11px;
+      color: #777;
+      transform: translateY(-50%);
+    }
+
+    /* События */
+    .event {
+      position: absolute;
+      left: 4px;
+      right: 4px;
+      border-radius: 4px;
+      background: rgba(51, 133, 255, 0.15);
+      border: 1px solid #337dff;
+      padding: 4px 6px 12px;
+      font-size: 12px;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .event-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .event-time {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .resize-handle {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 8px;
+      cursor: ns-resize;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .resize-handle::before {
+      content: "";
+      width: 30%;
+      height: 3px;
+      border-radius: 999px;
+      background: rgba(51, 125, 255, 0.9);
+    }
+
+    /* Подсветка при ресайзе */
+    .event.resizing {
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+<div class="calendar-wrapper">
+  <h1>Календарь (08:00–20:00, шаг 15 мин)</h1>
+
+  <div class="calendar">
+    <!-- Шапка -->
+    <div class="calendar-header">
+      <div class="time-header">Время</div>
+      <div class="day-header">Пн</div>
+      <div class="day-header">Вт</div>
+      <div class="day-header">Ср</div>
+      <div class="day-header">Чт</div>
+      <div class="day-header">Пт</div>
+    </div>
+
+    <!-- Тело -->
+    <div class="calendar-body">
+      <!-- Колонка времени -->
+      <div class="time-column">
+        <div class="time-column-inner" id="time-column-inner"></div>
+      </div>
+
+      <!-- 5 дневных колонок -->
+      <div class="day-column" data-day="0">
+        <div class="day-column-inner"></div>
+      </div>
+      <div class="day-column" data-day="1">
+        <div class="day-column-inner"></div>
+      </div>
+      <div class="day-column" data-day="2">
+        <div class="day-column-inner"></div>
+      </div>
+      <div class="day-column" data-day="3">
+        <div class="day-column-inner"></div>
+      </div>
+      <div class="day-column" data-day="4">
+        <div class="day-column-inner"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Настройки "времени"
+  const DAY_START = 8 * 60;    // 08:00 в минутах
+  const DAY_END   = 20 * 60;   // 20:00
+  const SLOT_MINUTES = 15;     // шаг 15 минут
+  const SLOT_HEIGHT  = 20;     // высота одного слота в пикселях
+  const TOTAL_SLOTS  = (DAY_END - DAY_START) / SLOT_MINUTES; // 48
+  const DAY_HEIGHT   = TOTAL_SLOTS * SLOT_HEIGHT; // 960px
+
+  // Пример данных событий
+  // time в формате "HH:MM"
+  const eventsData = [
+    { id: 1, day: 0, title: "Встреча с командой",   start: "09:00", end: "10:30" },
+    { id: 2, day: 0, title: "Звонок клиенту",       start: "10:00", end: "10:45" },
+    { id: 3, day: 2, title: "Фокус работа",         start: "11:15", end: "13:00" },
+    { id: 4, day: 2, title: "1:1 с сотрудником",    start: "12:30", end: "13:30" },
+    { id: 5, day: 4, title: "Демо проекта",         start: "16:00", end: "17:15" },
+    { id: 6, day: 3, title: "Демо проекта",         start: "16:00", end: "17:15" }
+  ];
+
+  // ===== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ =====
+
+  function timeToMinutes(timeStr) {
+    const [h, m] = timeStr.split(":").map(Number);
+    return h * 60 + m;
+  }
+
+  function minutesToTime(totalMinutes) {
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    const hh = String(h).padStart(2, "0");
+    const mm = String(m).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  // Выставляем подписи слева (08:00...20:00)
+  function renderTimeLabels() {
+    const timeColumnInner = document.getElementById("time-column-inner");
+    timeColumnInner.style.height = DAY_HEIGHT + "px";
+
+    for (let m = DAY_START; m <= DAY_END; m += 60) {
+      const label = document.createElement("div");
+      label.className = "time-label";
+      const offsetMinutes = m - DAY_START;
+      const top = (offsetMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+      label.style.top = top + "px";
+      label.textContent = minutesToTime(m);
+      timeColumnInner.appendChild(label);
+    }
+  }
+
+  // Раскладываем события по дням и обрабатываем пересечения
+  function layoutEvents() {
+    const columns = document.querySelectorAll(".day-column");
+
+    // Группируем события по day
+    const eventsByDay = {};
+    for (const ev of eventsData) {
+      if (!eventsByDay[ev.day]) eventsByDay[ev.day] = [];
+      eventsByDay[ev.day].push(ev);
+    }
+
+    columns.forEach((col) => {
+      const day = Number(col.dataset.day);
+      const inner = col.querySelector(".day-column-inner");
+      inner.style.height = DAY_HEIGHT + "px";
+
+      // очищаем
+      inner.innerHTML = "";
+
+      const dayEvents = eventsByDay[day] || [];
+      if (!dayEvents.length) return;
+
+      // Сначала считаем пересечения, чтобы разложить по ширине
+      // Простая жадная раскладка по "колонкам" внутри дня
+      // для каждого события посчитаем columnIndex и totalColumns (max перекрытий)
+      const positioned = [];
+      for (const ev of dayEvents) {
+        const startMin = timeToMinutes(ev.start);
+        const endMin = timeToMinutes(ev.end);
+        positioned.push({
+          ...ev,
+          startMin,
+          endMin,
+          columnIndex: 0,
+          columnsCount: 1
+        });
+      }
+
+      // сортируем по началу
+      positioned.sort((a, b) => a.startMin - b.startMin);
+
+      // массив активных "колонок"; каждая колонка — массив событий
+      const columnsBuckets = [];
+
+      for (const ev of positioned) {
+        let placed = false;
+        for (let i = 0; i < columnsBuckets.length; i++) {
+          const bucket = columnsBuckets[i];
+          // проверяем пересечение с последним в bucket
+          const last = bucket[bucket.length - 1];
+          if (last.endMin <= ev.startMin) {
+            // можно положить в эту колонку
+            bucket.push(ev);
+            ev.columnIndex = i;
+            placed = true;
+            break;
+          }
+        }
+
+        if (!placed) {
+          // создаём новую "внутреннюю колонку"
+          ev.columnIndex = columnsBuckets.length;
+          columnsBuckets.push([ev]);
+        }
+      }
+
+      const maxColumns = columnsBuckets.length;
+
+      // для каждого события записываем общее число колонок (для вычисления ширины)
+      positioned.forEach(ev => {
+        ev.columnsCount = maxColumns;
+      });
+
+      // Теперь создаём DOM-элементы
+      for (const ev of positioned) {
+        const eventEl = document.createElement("div");
+        eventEl.className = "event";
+        eventEl.dataset.id = ev.id;
+
+        // позиция по вертикали
+        const offsetMinutes = ev.startMin - DAY_START;
+        const durationMinutes = ev.endMin - ev.startMin;
+        const top = (offsetMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+        const height = (durationMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+
+        // позиция по горизонтали внутри дня
+        const widthPercent = 100 / ev.columnsCount;
+        const leftPercent = widthPercent * ev.columnIndex;
+
+        eventEl.style.top = top + "px";
+        eventEl.style.height = height + "px";
+        eventEl.style.width = `calc(${widthPercent}% - 4px)`; // небольшой зазор
+        eventEl.style.left = `calc(${leftPercent}% + 2px)`;
+
+        // контент
+        eventEl.innerHTML = `
+          <div class="event-title">${ev.title}</div>
+          <div class="event-time">
+            <span class="event-time-start">${ev.start}</span>–<span class="event-time-end">${ev.end}</span>
+          </div>
+          <div class="resize-handle"></div>
+        `;
+
+        // сохраняем данные в dataset для дальнейшего обновления
+        eventEl.dataset.startMin = ev.startMin;
+        eventEl.dataset.endMin = ev.endMin;
+
+        inner.appendChild(eventEl);
+      }
+    });
+  }
+
+  // ==== РЕСАЙЗ СОБЫТИЙ (ТЯНЕМ НИЖНИЙ КРАЙ) ====
+
+  let resizingEvent = null;
+  let startY = 0;
+  let startEndMin = 0;
+
+  function onResizeMouseDown(e) {
+    const handle = e.target.closest(".resize-handle");
+    if (!handle) return;
+
+    const eventEl = handle.closest(".event");
+    if (!eventEl) return;
+
+    e.preventDefault();
+
+    resizingEvent = eventEl;
+    startY = e.clientY;
+    startEndMin = Number(eventEl.dataset.endMin);
+
+    eventEl.classList.add("resizing");
+    document.addEventListener("mousemove", onResizeMouseMove);
+    document.addEventListener("mouseup", onResizeMouseUp);
+  }
+
+  function onResizeMouseMove(e) {
+    if (!resizingEvent) return;
+
+    const deltaY = e.clientY - startY;
+    // во сколько слотов (15-минутных) мы сдвинулись
+    const deltaSlots = Math.round(deltaY / SLOT_HEIGHT);
+    const deltaMinutes = deltaSlots * SLOT_MINUTES;
+
+    let newEnd = startEndMin + deltaMinutes;
+
+    const startMin = Number(resizingEvent.dataset.startMin);
+    // минимум 1 слот
+    const minEnd = startMin + SLOT_MINUTES;
+    // максимум конец дня
+    const maxEnd = DAY_END;
+
+    newEnd = clamp(newEnd, minEnd, maxEnd);
+
+    // применяем
+    const newDurationMinutes = newEnd - startMin;
+    const newHeight = (newDurationMinutes / SLOT_MINUTES) * SLOT_HEIGHT;
+
+    resizingEvent.dataset.endMin = newEnd;
+    resizingEvent.style.height = newHeight + "px";
+
+    // обновим текст времени
+    const timeEndSpan = resizingEvent.querySelector(".event-time-end");
+    if (timeEndSpan) {
+      timeEndSpan.textContent = minutesToTime(newEnd);
+    }
+  }
+
+  function onResizeMouseUp() {
+    if (resizingEvent) {
+      resizingEvent.classList.remove("resizing");
+    }
+    resizingEvent = null;
+    document.removeEventListener("mousemove", onResizeMouseMove);
+    document.removeEventListener("mouseup", onResizeMouseUp);
+  }
+
+  // Инициализация
+  document.addEventListener("DOMContentLoaded", () => {
+    renderTimeLabels();
+    layoutEvents();
+
+    // Вешаем один обработчик на весь календарь (делегирование)
+    document.querySelector(".calendar").addEventListener("mousedown", onResizeMouseDown);
+  });
+</script>
+</body>
+</html>
